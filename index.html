@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=DM+Sans:wght@400;500;700&family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&display=swap" rel="stylesheet" />
+  <title>For you ✨</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: grid; place-items: center; padding: 24px; overflow: hidden;
+      background: #050208; color: #fff; font-family: "DM Sans", system-ui, sans-serif;
+    }
+    .glow { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+    .glow span {
+      position: absolute; width: 60vmax; height: 60vmax; border-radius: 50%;
+      filter: blur(80px); opacity: .55; mix-blend-mode: screen; animation: drift 18s ease-in-out infinite alternate;
+    }
+    .glow span:nth-child(1) { background: #7c3aed; left: -20vmax; top: -20vmax; }
+    .glow span:nth-child(2) { background: #c026d3; right: -25vmax; bottom: -25vmax; animation-duration: 22s; }
+    .glow span:nth-child(3) { background: #6d28d9; left: 30vw; top: 40vh; width: 35vmax; height: 35vmax; animation-duration: 15s; }
+    @keyframes drift { to { transform: translate(8vw, -6vh) scale(1.15) rotate(40deg); } }
+    .card {
+      width: min(100%, 380px); text-align: center; padding: 36px 28px; border-radius: 28px;
+      background: rgb(255 255 255 / .06); border: 1px solid rgb(255 255 255 / .14);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 20px 60px -20px rgb(0 0 0 / .7);
+    }
+    .star { font-size: 44px; filter: drop-shadow(0 0 10px #fbbf24); animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { transform: scale(1.12); } }
+    h1 { font-family: "Fraunces", Georgia, serif; font-weight: 400; font-size: 30px; margin: 12px 0 4px; }
+    p.hint { font-family: "Caveat", cursive; font-size: 22px; color: #fcd34d; margin: 0 0 22px; }
+    input {
+      width: 100%; padding: 14px 18px; border-radius: 999px; font: inherit; font-size: 16px; color: #fff;
+      background: rgb(255 255 255 / .08); border: 1px solid rgb(255 255 255 / .2); outline: none; text-align: center;
+    }
+    input:focus { border-color: #c084fc; box-shadow: 0 0 0 3px rgb(192 132 252 / .35); }
+    button {
+      margin-top: 14px; width: 100%; padding: 13px; border: 0; border-radius: 999px; cursor: pointer;
+      font: inherit; font-weight: 700; color: #fff; background: linear-gradient(90deg, #7c3aed, #c026d3);
+      transition: transform .15s, opacity .15s;
+    }
+    button:hover { transform: scale(1.02); }
+    button:disabled { opacity: .6; cursor: wait; }
+    .msg { min-height: 1.4em; margin: 14px 0 0; font-size: 14px; color: #f0abfc; }
+    .shake { animation: shake .4s; }
+    @keyframes shake { 20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); } }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <main class="card" id="card">
+    <div class="star">✨</div>
+    <h1>Just for you</h1>
+    <p class="hint">this little universe is locked</p>
+    <form id="form" hidden>
+      <input id="pw" type="password" autocomplete="current-password" placeholder="password" aria-label="Password" required autofocus />
+      <button id="go" type="submit">Unlock</button>
+    </form>
+    <p class="msg" id="msg" role="status">opening…</p>
+  </main>
+
+  <script>
+    const BASE = '/for-vaidehi/'
+    const $ = (id) => document.getElementById(id)
+    const say = (t) => ($('msg').textContent = t)
+
+    function keyStore(mode, fn) {
+      return new Promise((resolve, reject) => {
+        const open = indexedDB.open('vault', 1)
+        open.onupgradeneeded = () => open.result.createObjectStore('keys')
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const req = fn(open.result.transaction('keys', mode).objectStore('keys'))
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        }
+      })
+    }
+
+    const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+    // Stored as raw bytes, not a CryptoKey: Safari's service worker can't
+    // read CryptoKey objects that a page saved (that caused a reload loop).
+    const KEY = 'site-raw'
+    const toKey = (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt'])
+    const session = (k, v) => {
+      try { return v === undefined ? sessionStorage.getItem(k) : sessionStorage.setItem(k, v) } catch { return null }
+    }
+    // ?locked = the service worker sent us back because it couldn't decrypt
+    const bounced = new URLSearchParams(location.search).has('locked')
+
+    async function opens(key) {
+      try {
+        const data = new Uint8Array(await (await fetch(BASE + 'check.enc', { cache: 'no-cache' })).arrayBuffer())
+        await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.subarray(0, 12) }, key, data.subarray(12))
+        return true
+      } catch { return false }
+    }
+
+    const enter = () => {
+      session('entered-at', String(Date.now()))
+      location.replace(BASE + 'app.html' + (location.hash || '#/'))
+    }
+
+    async function main() {
+      if (!('serviceWorker' in navigator) || !window.crypto?.subtle || !window.indexedDB) {
+        say('This browser can’t open the site. Try Chrome or Safari (not a private window).')
+        return
+      }
+      // make sure the newest worker is in charge before going in
+      const reg = await navigator.serviceWorker.register(BASE + 'sw.js', { scope: BASE })
+      await reg.update().catch(() => {})
+      const incoming = reg.installing || reg.waiting
+      if (incoming)
+        await new Promise((done) => {
+          incoming.addEventListener('statechange', () => incoming.state === 'activated' && done())
+          setTimeout(done, 5000)
+        })
+      await navigator.serviceWorker.ready
+      const meta = await (await fetch(BASE + 'meta.json', { cache: 'no-cache' })).json()
+
+      await keyStore('readwrite', (s) => s.delete('site')).catch(() => {}) // old key format
+
+      // remembered on this device from last time? (never auto-enter after a
+      // bounce, so a browser that can't decrypt can't get stuck reloading)
+      const saved = await keyStore('readonly', (s) => s.get(KEY)).catch(() => null)
+      const recent = (session('auto-enters') || '').split(',').map(Number).filter((t) => Date.now() - t < 20000)
+      if (saved && !bounced && recent.length < 2 && (await opens(await toKey(saved).catch(() => null)))) {
+        session('auto-enters', [...recent, Date.now()].join(','))
+        return enter()
+      }
+
+      const justTried = Date.now() - Number(session('entered-at') || 0) < 20000
+      if (bounced) history.replaceState(null, '', BASE + location.hash)
+      $('form').hidden = false
+      say((bounced && justTried) || recent.length >= 2 ? 'Hmm, this browser couldn’t open it. Try once more, or use Safari/Chrome in a normal (not private) tab.' : '')
+      $('pw').focus()
+
+      $('form').addEventListener('submit', async (e) => {
+        e.preventDefault()
+        $('go').disabled = true
+        say('checking…')
+        const base = await crypto.subtle.importKey('raw', new TextEncoder().encode($('pw').value), 'PBKDF2', false, ['deriveBits'])
+        const raw = new Uint8Array(await crypto.subtle.deriveBits(
+          { name: 'PBKDF2', salt: b64(meta.salt), iterations: meta.iterations, hash: 'SHA-256' }, base, 256,
+        ))
+        if (await opens(await toKey(raw))) {
+          await keyStore('readwrite', (s) => s.put(raw, KEY))
+          say('welcome in 💜')
+          return enter()
+        }
+        $('go').disabled = false
+        say('that’s not it, try again 💜')
+        $('card').classList.remove('shake'); void $('card').offsetWidth; $('card').classList.add('shake')
+        $('pw').select()
+      })
+    }
+    main().catch((err) => say('Something went wrong: ' + err.message))
+  </script>
+</body>
+</html>
